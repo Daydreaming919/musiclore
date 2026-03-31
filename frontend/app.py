@@ -1,295 +1,447 @@
-"""MusicLore Streamlit frontend — My Bloody Valentine–inspired aesthetic."""
+"""MusicLore Streamlit frontend — indie music aesthetic."""
+
+import base64
+import re
+import urllib.parse
+from pathlib import Path
 
 import streamlit as st
 import httpx
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import streamlit.components.v1 as components
 
 API_URL = "http://localhost:8080/chat"
+BG_PATH = Path(__file__).resolve().parent / "bg.jpg"
 
 # ── Page config ──────────────────────────────────────────────
-st.set_page_config(
-    page_title="MusicLore",
-    page_icon="🎸",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title="MusicLore", page_icon="🎸", layout="wide")
 
-# ── MBV-inspired palette ────────────────────────────────────
-# Hazy pinks, magentas, deep purples, washed-out whites
-MBV_CSS = """
+# ── Background image as base64 ───────────────────────────────
+bg_b64 = ""
+if BG_PATH.exists():
+    with open(BG_PATH, "rb") as f:
+        bg_b64 = base64.b64encode(f.read()).decode()
+
+bg_css = ""
+if bg_b64:
+    bg_css = f"""
+    .stApp {{
+        background-image: linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.88)),
+                          url("data:image/jpeg;base64,{bg_b64}") !important;
+        background-size: cover !important;
+        background-position: center !important;
+        background-attachment: fixed !important;
+    }}
+    """
+else:
+    bg_css = """
+    .stApp {
+        background-color: #0a0a0a !important;
+    }
+    """
+
+# ── CSS ──────────────────────────────────────────────────────
+st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
 
-:root {
-    --bg-deep: #0d0a12;
-    --bg-card: #1a1225;
-    --bg-card-hover: #231a30;
-    --pink-hot: #e84393;
-    --pink-soft: #fd79a8;
-    --magenta: #d63384;
-    --purple-wash: #6c5ce7;
-    --lavender: #a29bfe;
-    --text-primary: #f0e6f6;
-    --text-muted: #b8a9c9;
-    --white-haze: rgba(255,255,255,0.07);
-}
+/* ── Global ── */
+{bg_css}
+.stApp {{
+    color: #e8e6e1 !important;
+    font-family: 'DM Sans', sans-serif !important;
+}}
 
-/* Global */
-.stApp {
-    background: linear-gradient(170deg, #0d0a12 0%, #1a0a20 40%, #12081a 100%);
-    color: var(--text-primary);
-}
-.stApp > header { background: transparent !important; }
+/* Hide Streamlit chrome */
+header[data-testid="stHeader"] {{ display: none !important; }}
+footer {{ display: none !important; }}
+#MainMenu {{ display: none !important; }}
+[data-testid="stToolbar"] {{ display: none !important; }}
+[data-testid="stDecoration"] {{ display: none !important; }}
+[data-testid="stStatusWidget"] {{ display: none !important; }}
 
-/* Typography */
-h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+/* ── Typography ── */
+h1, h2, h3, h4 {{
     font-family: 'Space Mono', monospace !important;
-    color: var(--pink-soft) !important;
-    text-shadow: 0 0 30px rgba(232,67,147,0.3);
-}
-p, li, span, .stMarkdown p, .stMarkdown li {
-    font-family: 'DM Sans', sans-serif !important;
-    color: var(--text-primary) !important;
-}
+    color: #e8e6e1 !important;
+}}
+p, li, span, div {{
+    font-family: 'DM Sans', sans-serif;
+}}
+.stMarkdown p, .stMarkdown li {{
+    color: #e8e6e1 !important;
+    font-size: 14px !important;
+    line-height: 1.8 !important;
+}}
 
-/* Chat messages */
-[data-testid="stChatMessage"] {
-    background: var(--bg-card) !important;
-    border: 1px solid rgba(108,92,231,0.2) !important;
-    border-radius: 12px !important;
-    backdrop-filter: blur(10px);
-    margin-bottom: 1rem;
-}
-[data-testid="stChatMessage"]:hover {
-    border-color: var(--pink-hot) !important;
-    box-shadow: 0 0 20px rgba(232,67,147,0.15);
-}
-
-/* Chat input */
-[data-testid="stChatInput"] textarea {
-    background: var(--bg-card) !important;
-    border: 1px solid rgba(162,155,254,0.3) !important;
-    color: var(--text-primary) !important;
-    border-radius: 12px !important;
-    font-family: 'DM Sans', sans-serif !important;
-}
-[data-testid="stChatInput"] textarea:focus {
-    border-color: var(--pink-hot) !important;
-    box-shadow: 0 0 15px rgba(232,67,147,0.25) !important;
-}
-
-/* Expander */
-.streamlit-expanderHeader {
-    background: var(--bg-card) !important;
-    border: 1px solid rgba(162,155,254,0.2) !important;
+/* ── Chat input ── */
+[data-testid="stChatInput"] {{
+    background: transparent !important;
+}}
+[data-testid="stChatInput"] textarea {{
+    background: #141414 !important;
+    border: 1px solid #2a2a2a !important;
+    color: #e8e6e1 !important;
     border-radius: 8px !important;
-    color: var(--lavender) !important;
-    font-family: 'Space Mono', monospace !important;
-}
-.streamlit-expanderContent {
-    background: var(--bg-card) !important;
-    border: 1px solid rgba(108,92,231,0.15) !important;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-deep); }
-::-webkit-scrollbar-thumb { background: var(--magenta); border-radius: 3px; }
-
-/* Divider */
-hr { border-color: rgba(162,155,254,0.15) !important; }
-
-/* Captions */
-.stCaption, [data-testid="stCaption"] {
-    color: var(--text-muted) !important;
-    font-family: 'Space Mono', monospace !important;
-    font-size: 0.75rem !important;
-}
-
-/* Title glow animation */
-@keyframes haze-pulse {
-    0%, 100% { text-shadow: 0 0 30px rgba(232,67,147,0.3), 0 0 60px rgba(108,92,231,0.15); }
-    50% { text-shadow: 0 0 40px rgba(232,67,147,0.5), 0 0 80px rgba(108,92,231,0.25); }
-}
-.title-glow {
-    animation: haze-pulse 4s ease-in-out infinite;
-    font-family: 'Space Mono', monospace !important;
-    color: #fd79a8 !important;
-    text-align: center;
-    font-size: 2.2rem !important;
-    letter-spacing: 0.15em;
-    margin-bottom: 0 !important;
-}
-.subtitle-haze {
-    text-align: center;
-    color: #b8a9c9 !important;
     font-family: 'DM Sans', sans-serif !important;
-    font-size: 0.95rem;
-    margin-top: 0.2rem;
-    letter-spacing: 0.08em;
-}
+    font-size: 14px !important;
+}}
+[data-testid="stChatInput"] textarea:focus {{
+    border-color: #c45d3e !important;
+    box-shadow: none !important;
+}}
+[data-testid="stChatInput"] textarea::placeholder {{
+    color: #555 !important;
+}}
+[data-testid="stChatInput"] button {{
+    background: #c45d3e !important;
+    color: #0a0a0a !important;
+    border-radius: 6px !important;
+}}
 
-/* Noise overlay for MBV feel */
-.noise-overlay {
-    position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.03;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
+/* Hide default chat message containers */
+[data-testid="stChatMessage"] {{
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}}
+[data-testid="stChatMessage"] [data-testid="chatAvatarIcon-user"],
+[data-testid="stChatMessage"] [data-testid="chatAvatarIcon-assistant"],
+[data-testid="stChatMessage"] .stChatMessageAvatarContainer,
+[data-testid="stChatMessage"] > div:first-child {{
+    display: none !important;
+}}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {{ width: 4px; }}
+::-webkit-scrollbar-track {{ background: #0a0a0a; }}
+::-webkit-scrollbar-thumb {{ background: #2a2a2a; border-radius: 2px; }}
+::-webkit-scrollbar-thumb:hover {{ background: #c45d3e; }}
+
+/* ── Plotly ── */
+.js-plotly-plot {{ border-radius: 8px; }}
+
+/* ── Block container ── */
+.block-container {{
+    padding-top: 2rem !important;
+    padding-bottom: 0 !important;
+}}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] > div {{
+    color: #555 !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: 12px !important;
+    letter-spacing: 1px !important;
+}}
 </style>
-<div class="noise-overlay"></div>
-"""
-st.markdown(MBV_CSS, unsafe_allow_html=True)
-
-# ── Header ───────────────────────────────────────────────────
-st.markdown('<p class="title-glow">🎸 MusicLore</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle-haze">小众音乐发掘 Agent · Post-Punk · Shoegaze · Krautrock</p>', unsafe_allow_html=True)
-st.markdown("---")
+""", unsafe_allow_html=True)
 
 # ── Session state ────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# ── Layout: 3 columns, content in center ─────────────────────
+_left, center, _right = st.columns([2, 5, 2])
 
-# ── Renderers ────────────────────────────────────────────────
-TIER_COLORS = {
-    "mainstream": "#e84393",
-    "mid": "#fd79a8",
-    "underground": "#6c5ce7",
-    "niche": "#a29bfe",
-    "unknown": "#636e72",
-}
+with center:
+    # ── Header ───────────────────────────────────────────────
+    st.markdown("""
+    <div style="padding:20px 0 16px;">
+        <div style="font-family:'Space Mono',monospace; font-size:32px; color:#e8e6e1; letter-spacing:4px; font-weight:700;">
+            MusicLore
+        </div>
+        <div style="font-family:'DM Sans',sans-serif; font-size:14px; color:#888; font-style:italic; margin-top:2px;">
+            Explore the underground
+        </div>
+        <div style="height:1px; background:#2a2a2a; margin-top:16px;"></div>
+    </div>
+    """, unsafe_allow_html=True)
 
+    # ── Render helpers ───────────────────────────────────────
 
-def render_timeline(data: dict):
-    entries = data.get("entries", [])
-    if not entries:
-        return
-    df = pd.DataFrame(entries)
-    df = df.dropna(subset=["year"])
-    df["year"] = df["year"].astype(int)
-    df = df.sort_values("year")
-    df["tier"] = df.get("tier", pd.Series(["unknown"] * len(df)))
+    def render_user_msg(text: str):
+        safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        st.markdown(f"""
+        <div style="display:flex; justify-content:flex-end; margin:1rem 0;">
+          <div style="background:#1a1a1a; border:1px solid #2a2a2a; border-radius:12px;
+                      padding:12px 18px; max-width:70%; color:#e8e6e1; font-size:14px;
+                      font-family:'DM Sans',sans-serif; line-height:1.6;">
+            {safe}
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    fig = px.bar(
-        df, x="year", y="artist", color="tier",
-        orientation="h",
-        color_discrete_map=TIER_COLORS,
-        hover_data=["country", "listeners"],
-        title=f"⏳ {data.get('genre', '')} Timeline",
-    )
-    fig.update_layout(
-        plot_bgcolor="rgba(13,10,18,0.8)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Space Mono", color="#f0e6f6"),
-        title_font=dict(color="#fd79a8", size=18),
-        xaxis=dict(gridcolor="rgba(162,155,254,0.1)", title="Year"),
-        yaxis=dict(gridcolor="rgba(162,155,254,0.1)", title="", autorange="reversed"),
-        legend=dict(bgcolor="rgba(26,18,37,0.8)", font=dict(color="#b8a9c9")),
-        height=max(400, len(df) * 28),
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    def render_ai_msg(text: str):
+        st.markdown("""
+        <div style="margin:1rem 0 0.4rem;">
+          <div style="color:#c45d3e; font-size:11px; font-family:'Space Mono',monospace;
+                      text-transform:uppercase; letter-spacing:2px; margin-bottom:6px;">
+            musiclore
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(text, unsafe_allow_html=True)
 
+    def render_timeline(data: dict):
+        entries = data.get("entries", [])
+        if not entries:
+            return
+        df = pd.DataFrame(entries)
+        df = df.dropna(subset=["year"])
+        df["year"] = df["year"].astype(int)
+        df = df.sort_values("year")
+        if "tier" not in df.columns:
+            df["tier"] = "unknown"
 
-def render_recommendations(data: dict):
-    seed = data.get("seed_artist", "")
-    st.markdown(f"#### 🔮 基于 **{seed}** 的推荐")
-    cards = data.get("cards", [])
-    for card in cards:
-        artist = card.get("artist", "Unknown")
-        reason = card.get("reason", "")
-        path = card.get("path", [])
-        listeners = card.get("listeners", "N/A")
-        embed_url = card.get("embed_url", "")
+        color_map = {
+            "niche": "#c45d3e",
+            "underground": "#7a9e7e",
+            "mid": "#888888",
+            "mainstream": "#444444",
+            "unknown": "#333333",
+        }
 
-        with st.expander(f"🎵 {artist} — {listeners:,} listeners" if isinstance(listeners, int) else f"🎵 {artist}"):
+        fig = go.Figure()
+        for tier, color in color_map.items():
+            subset = df[df["tier"] == tier]
+            if subset.empty:
+                continue
+            fig.add_trace(go.Bar(
+                x=subset["year"],
+                y=subset["artist"],
+                orientation="h",
+                name=tier,
+                marker_color=color,
+                hovertemplate="%{y}<br>%{x}<extra></extra>",
+            ))
+
+        genre = data.get("genre", "")
+        fig.update_layout(
+            title=dict(
+                text=f"{genre} Timeline",
+                font=dict(family="Space Mono", size=14, color="#c45d3e"),
+            ),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="DM Sans", color="#e8e6e1", size=12),
+            xaxis=dict(gridcolor="#1a1a1a", title="", zeroline=False),
+            yaxis=dict(gridcolor="#1a1a1a", title="", autorange="reversed"),
+            legend=dict(
+                bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#888", size=11, family="Space Mono"),
+            ),
+            height=max(400, len(df) * 26),
+            margin=dict(l=0, r=0, t=40, b=20),
+            barmode="stack",
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    def render_recommendations(data: dict):
+        seed = data.get("seed_artist", "")
+        if seed:
+            st.markdown(f"""
+            <div style="font-family:'Space Mono',monospace; font-size:12px; color:#888;
+                        text-transform:uppercase; letter-spacing:2px; margin:20px 0 12px;">
+                Recommendations based on {seed}
+            </div>
+            """, unsafe_allow_html=True)
+
+        for card in data.get("cards", []):
+            artist = card.get("artist", "Unknown")
+            reason = card.get("reason", "")
+            path = card.get("path", [])
+            listeners = card.get("listeners")
+            embed_url = card.get("embed_url", "")
+
+            listeners_html = ""
+            if listeners is not None:
+                try:
+                    listeners_html = (
+                        f'<span style="background:#1a2e1a; color:#7a9e7e; font-size:11px;'
+                        f' padding:3px 10px; border-radius:20px; margin-left:10px;'
+                        f' font-family:\'Space Mono\',monospace;">'
+                        f'{int(listeners):,} listeners</span>'
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+            reason_html = ""
             if reason:
-                st.markdown(f"**推荐理由：** {reason}")
+                safe_reason = str(reason).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                reason_html = (
+                    f'<p style="color:#888; font-size:13px; margin-top:10px; line-height:1.6;'
+                    f' font-family:\'DM Sans\',sans-serif;">{safe_reason}</p>'
+                )
+
+            path_html = ""
             if path:
-                path_str = " → ".join(path)
-                st.markdown(f"**影响路径：** `{path_str}`")
-            if listeners and isinstance(listeners, int):
-                st.caption(f"Last.fm listeners: {listeners:,}")
-            if embed_url:
-                components.iframe(embed_url, height=200)
+                path_str = " &rarr; ".join(str(p) for p in path)
+                path_html = (
+                    f'<div style="margin-top:10px;">'
+                    f'<span style="font-size:11px; font-family:\'Space Mono\',monospace;'
+                    f' color:#c45d3e;">influence path: </span>'
+                    f'<span style="font-size:12px; color:#888;'
+                    f' font-family:\'DM Sans\',sans-serif;">{path_str}</span>'
+                    f'</div>'
+                )
 
+            st.markdown(
+                f'<div style="background:#141414; border:1px solid #2a2a2a; border-radius:12px;'
+                f' padding:20px; margin:12px 0;">'
+                f'<div style="display:flex; justify-content:space-between; align-items:center;'
+                f' flex-wrap:wrap;">'
+                f'<div>'
+                f'<span style="font-family:\'Space Mono\',monospace; font-size:18px;'
+                f' color:#e8e6e1;">{artist}</span>'
+                f'{listeners_html}'
+                f'</div></div>'
+                f'{reason_html}'
+                f'{path_html}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-def render_microcourse(data: dict):
-    topic = data.get("topic", "")
-    st.markdown(f"#### 📖 {topic}")
-    for section in data.get("sections", []):
-        st.markdown(f"**{section.get('title', '')}**")
-        st.markdown(section.get("content", ""))
-        sources = section.get("sources", [])
-        if sources:
-            for src in sources:
-                st.caption(f"📎 {src}")
-    embed_url = data.get("embed_url", "")
-    if embed_url:
-        st.markdown("**🎧 Listen**")
-        components.iframe(embed_url, height=200)
+            if embed_url and "youtube.com/embed/" in embed_url:
+                components.iframe(embed_url, height=80)
+            else:
+                yt_query = urllib.parse.quote(f"{artist} full album")
+                st.markdown(
+                    f'<div style="margin:-4px 0 8px 0;">'
+                    f'<a href="https://www.youtube.com/results?search_query={yt_query}"'
+                    f' target="_blank"'
+                    f' style="font-size:11px; color:#555; text-decoration:none;'
+                    f' font-family:\'Space Mono\',monospace;">'
+                    f'&#9655; Search on YouTube</a></div>',
+                    unsafe_allow_html=True,
+                )
 
+    def render_microcourse(data: dict):
+        topic = data.get("topic", "")
+        if topic:
+            st.markdown(
+                f'<div style="font-family:\'Space Mono\',monospace; font-size:12px; color:#c45d3e;'
+                f' text-transform:uppercase; letter-spacing:2px; margin:20px 0 16px;">'
+                f'{topic}</div>',
+                unsafe_allow_html=True,
+            )
 
-def render_structured(data: dict):
-    t = data.get("type")
-    if t == "timeline":
-        render_timeline(data)
-    elif t == "recommendations":
-        render_recommendations(data)
-    elif t == "microcourse":
-        render_microcourse(data)
+        for section in data.get("sections", []):
+            title = section.get("title", "")
+            content = section.get("content", "")
+            sources = section.get("sources", [])
 
+            source_html = ""
+            if sources:
+                links = " ".join(
+                    f'<a href="{s}" target="_blank" style="font-size:11px; color:#555;'
+                    f' text-decoration:none; font-family:\'Space Mono\',monospace;">[source]</a>'
+                    for s in sources if s
+                )
+                source_html = f'<div style="margin-top:6px;">{links}</div>'
 
-# ── Chat history display ────────────────────────────────────
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        if msg.get("structured_data"):
-            render_structured(msg["structured_data"])
+            # Escape content for safety but allow newlines
+            safe_content = str(content).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe_content = safe_content.replace("\n", "<br>")
 
-# ── Chat input ───────────────────────────────────────────────
-if prompt := st.chat_input("问我关于 Post-Punk、Shoegaze、Krautrock 的任何问题..."):
-    # Show user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+            st.markdown(
+                f'<div style="margin:24px 0;">'
+                f'<div style="font-family:\'Space Mono\',monospace; font-size:13px; color:#c45d3e;'
+                f' text-transform:uppercase; letter-spacing:2px; margin-bottom:8px;">{title}</div>'
+                f'<div style="color:#e8e6e1; font-size:14px; line-height:1.8;'
+                f' font-family:\'DM Sans\',sans-serif;">{safe_content}</div>'
+                f'{source_html}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    # Call API
-    with st.chat_message("assistant"):
-        with st.spinner("🌀 正在探索音乐知识图谱..."):
-            try:
-                resp = httpx.post(API_URL, json={"message": prompt}, timeout=180)
-                resp.raise_for_status()
-                result = resp.json()
+        embed_url = data.get("embed_url", "")
+        if embed_url and "youtube.com/embed/" in embed_url:
+            components.iframe(embed_url, height=80)
 
-                text = result.get("text", "")
-                structured = result.get("structured_data")
+    def render_structured(data: dict):
+        if not data or not isinstance(data, dict):
+            return
+        try:
+            t = data.get("type")
+            if t == "timeline":
+                render_timeline(data)
+            elif t == "recommendations":
+                render_recommendations(data)
+            elif t == "microcourse":
+                render_microcourse(data)
+        except Exception:
+            pass
 
-                # Clean out raw JSON blocks from display text
-                import re
-                display_text = re.sub(r'```json\s*\n?.*?\n?\s*```', '', text, flags=re.DOTALL).strip()
-                if display_text:
-                    st.markdown(display_text)
+    # ── Display chat history ─────────────────────────────────
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            render_user_msg(msg["content"])
+        else:
+            render_ai_msg(msg["content"])
+            if msg.get("structured_data"):
+                render_structured(msg["structured_data"])
 
-                if structured:
-                    render_structured(structured)
+    # ── Chat input ───────────────────────────────────────────
+    if prompt := st.chat_input("输入你想探索的音乐..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        render_user_msg(prompt)
 
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": display_text,
-                    "structured_data": structured,
-                })
+        loading = st.empty()
+        loading.markdown(
+            '<div style="color:#555; font-size:12px; font-family:\'Space Mono\',monospace;'
+            ' letter-spacing:1px; margin:1rem 0;">'
+            '&#x27F3; searching the graph...</div>',
+            unsafe_allow_html=True,
+        )
 
-            except httpx.TimeoutException:
-                st.error("⏰ 请求超时，请稍后重试")
-            except Exception as e:
-                st.error(f"❌ 请求失败: {e}")
+        try:
+            resp = httpx.post(API_URL, json={"message": prompt}, timeout=180)
+            resp.raise_for_status()
+            result = resp.json()
 
-# ── Footer ───────────────────────────────────────────────────
-st.markdown("---")
-st.caption("Data: MusicBrainz (CC0) · Wikidata (CC0) · Wikipedia (CC BY-SA) · Powered by Last.fm")
+            text = result.get("text", "")
+            structured = result.get("structured_data")
+
+            display_text = re.sub(r'```json\s*\n?.*?\n?\s*```', '', text, flags=re.DOTALL).strip()
+
+            loading.empty()
+
+            if display_text:
+                render_ai_msg(display_text)
+            if structured:
+                render_structured(structured)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": display_text,
+                "structured_data": structured,
+            })
+
+        except httpx.TimeoutException:
+            loading.empty()
+            st.markdown(
+                '<div style="color:#c45d3e; font-size:13px; font-family:\'Space Mono\',monospace;'
+                ' margin:1rem 0;">timeout — try again</div>',
+                unsafe_allow_html=True,
+            )
+        except Exception as e:
+            loading.empty()
+            st.markdown(
+                f'<div style="color:#c45d3e; font-size:13px; font-family:\'Space Mono\',monospace;'
+                f' margin:1rem 0;">error — {str(e)[:100]}</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Footer ───────────────────────────────────────────────
+    st.markdown(
+        '<div style="text-align:center; padding:40px 0 20px; border-top:1px solid #1a1a1a;'
+        ' margin-top:40px;">'
+        '<p style="font-size:11px; color:#444; font-family:\'Space Mono\',monospace;'
+        ' letter-spacing:1px;">'
+        'DATA &middot; MUSICBRAINZ (CC0) &middot; WIKIDATA (CC0) &middot;'
+        ' WIKIPEDIA (CC BY-SA) &middot; LAST.FM'
+        '</p></div>',
+        unsafe_allow_html=True,
+    )
